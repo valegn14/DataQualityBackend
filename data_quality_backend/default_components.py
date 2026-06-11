@@ -40,13 +40,13 @@ class StaticQueryPlanner(HeuristicQueryPlanner):
     def build_action(
         self,
         prompt: str,
-        schema_metadata: SchemaMetadata,
+        schema_metadata: dict[str, SchemaMetadata],
         previous_queries: list[str] | None = None,
         previous_results: list[QueryResult] | None = None,
         assistant_history: list[str] | None = None,
         sample_data: list[dict] | None = None,
     ) -> PlannerAction:
-        _ = asdict(schema_metadata)
+        _ = asdict(next(iter(schema_metadata.values())))
         return super().build_action(
             prompt,
             schema_metadata,

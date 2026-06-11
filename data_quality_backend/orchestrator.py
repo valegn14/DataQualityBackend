@@ -15,7 +15,7 @@ class QueryPlanner(Protocol):
     def build_action(
         self,
         prompt: str,
-        schema_metadata: SchemaMetadata,
+        schema_metadata: dict[str, SchemaMetadata],
         previous_queries: list[str] | None = None,
         previous_results: list[QueryResult] | None = None,
         assistant_history: list[str] | None = None,
@@ -52,10 +52,14 @@ class AuditLogger(Protocol):
 class OrchestrationResult:
     request_id: str
     database_id: str
+    database_ids: list[str] | None
     sql: list[str] | None
+    intent: str | None
+    plan_steps: list[dict[str, object]] | None
     validation: ValidationResult
     result: QueryResult | None
     formatted_result: dict[str, object] | None
+    context: dict[str, object] | None = None
     assistant_history: list[str] = field(default_factory=list)
     executed_queries: list[str] = field(default_factory=list)
     final_comment: str | None = None
@@ -100,51 +104,41 @@ class DatabaseOrchestrator:
         self._audit_logger.log_request(request)
 
         emit("Instanciando base de datos")
-        database_handle = self._mcp_client.instantiate_database(
-            request.database_id
-        )
+        database_ids = request.database_ids or [request.database_id]
+        database_handles: dict[str, DatabaseHandle] = {}
+        schema_map: dict[str, SchemaMetadata] = {}
 
-        try:
-            schema_metadata = self._schema_cache.get(
-                request.database_id
-            )
+        for dataset_id in database_ids:
+            handle = self._mcp_client.instantiate_database(dataset_id)
+            database_handles[dataset_id] = handle
+            schema_metadata = self._schema_cache.get(dataset_id)
 
             if schema_metadata is None:
-                self._audit_logger.log_schema_miss(
-                    request.database_id
-                )
-                emit("Leyendo esquema desde MCP")
-
-                schema_metadata = (
-                    self._schema_inspector.load_schema(
-                        database_handle
-                    )
-                )
-
-                self._schema_cache.put(
-                    request.database_id,
-                    schema_metadata,
-                )
+                self._audit_logger.log_schema_miss(dataset_id)
+                emit(f"Leyendo esquema desde MCP para {dataset_id}")
+                schema_metadata = self._schema_inspector.load_schema(handle)
+                self._schema_cache.put(dataset_id, schema_metadata)
             else:
-                self._audit_logger.log_schema_hit(
-                    request.database_id
-                )
-                emit("Usando esquema en caché")
+                self._audit_logger.log_schema_hit(dataset_id)
+                emit(f"Usando esquema en caché para {dataset_id}")
 
-            max_attempts = getattr(request, "max_attempts", self._settings.max_planner_attempts)
+            schema_map[dataset_id] = schema_metadata
 
-            attempt = 0
+        max_attempts = request.max_attempts if isinstance(request.max_attempts, int) else self._settings.max_planner_attempts
 
-            last_result = None
-            last_formatted = None
-            last_sql = None
-            last_validation = ValidationResult(True, [])
-            final_comment: str | None = None
-            query_history: list[str] = []
-            result_history: list[QueryResult] = []
-            assistant_history: list[str] = list(request.assistant_context)
-            executed_queries: list[str] = []
+        attempt = 0
 
+        last_result = None
+        last_formatted = None
+        last_sql = None
+        last_validation = ValidationResult(True, [])
+        final_comment: str | None = None
+        query_history: list[str] = []
+        result_history: list[QueryResult] = []
+        assistant_history: list[str] = list(request.assistant_context)
+        executed_queries: list[str] = []
+
+        try:
             while attempt < max_attempts:
                 attempt += 1
 
@@ -152,7 +146,7 @@ class DatabaseOrchestrator:
 
                 action = self._query_planner.build_action(
                     prompt=request.prompt,
-                    schema_metadata=schema_metadata,
+                    schema_metadata=schema_map,
                     previous_queries=query_history,
                     previous_results=result_history,
                     assistant_history=assistant_history,
@@ -163,19 +157,51 @@ class DatabaseOrchestrator:
                 if action.comment:
                     assistant_history.append(action.comment)
 
+                if action.action == "plan":
+                    emit("Plan de trabajo recibido del agente")
+                    return OrchestrationResult(
+                        request_id=request.request_id,
+                        database_id=request.database_id,
+                        database_ids=database_ids,
+                        sql=last_sql,
+                        intent=action.intent,
+                        plan_steps=action.plan_steps,
+                        validation=last_validation,
+                        result=None,
+                        formatted_result=None,
+                        context={
+                            "dataset_ids": database_ids,
+                            "selected_dataset": action.dataset_id,
+                            "previous_query_count": len(query_history),
+                        },
+                        assistant_history=assistant_history,
+                        executed_queries=executed_queries,
+                        final_comment=action.comment,
+                        progress=progress_messages,
+                    )
+
                 if action.action == "analysis":
                     emit("Análisis recibido del agente")
-                    if not action.sql and attempt >= max_attempts:
-                        emit("No se ejecutó consulta y se alcanzó el límite de intentos")
-                        break
-                    continue
+                    if not action.sql:
+                        if attempt >= max_attempts:
+                            emit("No se ejecutó consulta y se alcanzó el límite de intentos")
+                            break
+                        continue
+                    # If analysis carries SQL, try to execute it.
 
                 if action.action == "execute":
                     if not action.sql:
                         emit("No se encontró SQL para ejecutar")
                         break
 
-                    # support multiple SQL statements returned by the planner
+                    target_dataset_id = action.dataset_id or database_ids[0]
+                    if target_dataset_id not in schema_map:
+                        emit(f"Dataset desconocido: {target_dataset_id}")
+                        break
+
+                    database_handle = database_handles[target_dataset_id]
+                    target_schema = schema_map[target_dataset_id]
+
                     stmts: list[str] = action.sql if isinstance(action.sql, list) else [action.sql]
 
                     for stmt in stmts:
@@ -185,17 +211,16 @@ class DatabaseOrchestrator:
 
                         validation = self._query_validator.validate(
                             stmt,
-                            schema_metadata,
+                            target_schema,
                             request.allow_write,
                         )
                         last_validation = validation
 
                         if not validation.is_valid:
                             emit("Consulta no válida: " + "; ".join(validation.reasons))
-                            # stop processing further statements on validation failure
                             break
 
-                        emit("Ejecutando consulta")
+                        emit("Ejecutando consulta en dataset " + target_dataset_id)
                         self._audit_logger.log_query(stmt)
 
                         rows = self._mcp_client.send_query(
@@ -232,7 +257,26 @@ class DatabaseOrchestrator:
                         last_formatted = formatted_result
                         last_validation = validation
 
-                    continue
+                    return OrchestrationResult(
+                        request_id=request.request_id,
+                        database_id=request.database_id,
+                        database_ids=database_ids,
+                        sql=last_sql,
+                        intent=action.intent,
+                        plan_steps=action.plan_steps,
+                        validation=last_validation,
+                        result=last_result,
+                        formatted_result=last_formatted,
+                        context={
+                            "dataset_ids": database_ids,
+                            "selected_dataset": target_dataset_id,
+                            "previous_query_count": len(query_history),
+                        },
+                        assistant_history=assistant_history,
+                        executed_queries=executed_queries,
+                        final_comment=action.comment,
+                        progress=progress_messages,
+                    )
 
                 if action.action == "final":
                     emit("Agente finalizó el razonamiento")
@@ -247,17 +291,22 @@ class DatabaseOrchestrator:
             return OrchestrationResult(
                 request_id=request.request_id,
                 database_id=request.database_id,
+                database_ids=database_ids,
                 sql=last_sql,
+                intent=None,
+                plan_steps=None,
                 validation=last_validation,
                 result=last_result,
                 formatted_result=last_formatted,
+                context={
+                    "dataset_ids": database_ids,
+                    "previous_query_count": len(query_history),
+                },
                 assistant_history=assistant_history,
                 executed_queries=executed_queries,
                 final_comment=final_comment,
                 progress=progress_messages,
             )
-
         finally:
-            self._mcp_client.release_database(
-                database_handle
-            )
+            for handle in database_handles.values():
+                self._mcp_client.release_database(handle)

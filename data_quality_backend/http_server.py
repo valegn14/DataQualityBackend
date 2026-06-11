@@ -60,7 +60,11 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     "data": {
                         "request_id": result.request_id,
                         "database_id": result.database_id,
+                        "database_ids": result.database_ids,
                         "sql": result.sql,
+                        "intent": result.intent,
+                        "plan_steps": result.plan_steps,
+                        "context": result.context,
                         "validation": {
                             "is_valid": result.validation.is_valid,
                             "reasons": result.validation.reasons,
@@ -101,7 +105,11 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 "data": {
                     "request_id": result.request_id,
                     "database_id": result.database_id,
+                    "database_ids": result.database_ids,
                     "sql": result.sql,
+                    "intent": result.intent,
+                    "plan_steps": result.plan_steps,
+                    "context": result.context,
                     "validation": {
                         "is_valid": result.validation.is_valid,
                         "reasons": result.validation.reasons,
@@ -145,16 +153,21 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         user_id = payload.get("user_id") if isinstance(payload.get("user_id"), str) else "http-user"
         allow_write = bool(payload.get("allow_write", settings.allow_write_default))
         max_rows = payload.get("max_rows") if isinstance(payload.get("max_rows"), int) else settings.default_max_rows
+        max_attempts = payload.get("max_attempts") if isinstance(payload.get("max_attempts"), int) else None
         preferred_dialect = payload.get("preferred_dialect") if isinstance(payload.get("preferred_dialect"), str) else None
         assistant_context = payload.get("assistant_context") if isinstance(payload.get("assistant_context"), list) else []
+        raw_database_ids = payload.get("database_ids") if isinstance(payload.get("database_ids"), list) else None
+        database_ids = [str(item) for item in raw_database_ids if isinstance(item, str)] if raw_database_ids is not None else None
 
         return AgentRequest(
             request_id=request_id,
             user_id=user_id,
             prompt=prompt,
             database_id=database_id,
+            database_ids=database_ids,
             allow_write=allow_write,
             max_rows=max_rows,
+            max_attempts=max_attempts,
             preferred_dialect=preferred_dialect,
             assistant_context=assistant_context,
         )

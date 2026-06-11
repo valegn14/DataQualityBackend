@@ -11,10 +11,13 @@ class AgentRequest:
     user_id: str
     prompt: str
     database_id: str
+    database_ids: list[str] | None = None
     allow_write: bool = False
     max_rows: int = 100
+    max_attempts: int | None = None
     preferred_dialect: str | None = None
     assistant_context: list[str] = field(default_factory=list)
+    workflow_phase: str | None = None
 
 
 @dataclass(slots=True)
@@ -74,6 +77,9 @@ class QueryResult:
 @dataclass(slots=True)
 class PlannerAction:
     action: str
+    intent: str | None = None
     sql: list[str] | None = None
+    dataset_id: str | None = None
+    plan_steps: list[dict[str, Any]] | None = None
     comment: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
