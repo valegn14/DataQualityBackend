@@ -1,0 +1,8 @@
+.venv
+.claude
+.env.example
+.env
+.idea
+__pycache__
+*.pyc
+*.pyo       

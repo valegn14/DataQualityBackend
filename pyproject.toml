@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-analysis-backend"
+version = "0.1.0"
+description = "Agent de consultas a base de datos vía MCP"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+data-analysis-backend = "data_analysis_backend.http_server:main"
+
+[tool.setuptools]
+packages = ["data_analysis_backend"]
