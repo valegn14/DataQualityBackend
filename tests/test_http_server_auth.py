@@ -5,10 +5,10 @@ import json
 import threading
 import time
 
-from data_analysis_backend.http_server import AgentHTTPServer, AgentRequestHandler, build_runtime_orchestrator
-from data_analysis_backend.auth import ApiKeyAuthenticator
-from data_analysis_backend.planner import HeuristicQueryPlanner
-from data_analysis_backend.settings import AppSettings
+from data_quality_backend.http_server import AgentHTTPServer, AgentRequestHandler, build_runtime_orchestrator
+from data_quality_backend.auth import ApiKeyAuthenticator
+from data_quality_backend.planner import HeuristicQueryPlanner
+from data_quality_backend.settings import AppSettings
 
 
 def _start_server() -> tuple[AgentHTTPServer, tuple[str, int]]:

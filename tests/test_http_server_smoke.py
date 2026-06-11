@@ -5,9 +5,9 @@ import threading
 import time
 from urllib.request import Request, urlopen
 
-from data_analysis_backend.http_server import AgentHTTPServer, AgentRequestHandler, build_demo_orchestrator
-from data_analysis_backend.planner import HeuristicQueryPlanner
-from data_analysis_backend.settings import AppSettings
+from data_quality_backend.http_server import AgentHTTPServer, AgentRequestHandler, build_demo_orchestrator
+from data_quality_backend.planner import HeuristicQueryPlanner
+from data_quality_backend.settings import AppSettings
 
 
 def _start_server() -> tuple[AgentHTTPServer, str]:

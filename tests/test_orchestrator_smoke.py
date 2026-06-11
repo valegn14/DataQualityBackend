@@ -2,19 +2,19 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from data_analysis_backend.contracts import (
+from data_quality_backend.contracts import (
     AgentRequest,
     ColumnMetadata,
     RelationMetadata,
     SchemaMetadata,
     TableMetadata,
 )
-from data_analysis_backend.default_components import ConsoleAuditLogger, DefaultResultFormatter, StaticQueryPlanner
-from data_analysis_backend.mcp_client import InMemoryDatabaseSpec, LocalMCPServerClient
-from data_analysis_backend.mcp_schema_inspector import MCPBackedSchemaInspector
-from data_analysis_backend.orchestrator import DatabaseOrchestrator
-from data_analysis_backend.schema_cache import SchemaCache
-from data_analysis_backend.validator import QueryValidator
+from data_quality_backend.default_components import ConsoleAuditLogger, DefaultResultFormatter, StaticQueryPlanner
+from data_quality_backend.mcp_client import InMemoryDatabaseSpec, LocalMCPServerClient
+from data_quality_backend.mcp_schema_inspector import MCPBackedSchemaInspector
+from data_quality_backend.orchestrator import DatabaseOrchestrator
+from data_quality_backend.schema_cache import SchemaCache
+from data_quality_backend.validator import QueryValidator
 
 
 def test_orchestrator_smoke() -> None:
