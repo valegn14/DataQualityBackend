@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
-from .contracts import AgentRequest, DatabaseHandle, QueryResult, SchemaMetadata
+from .contracts import AgentRequest, DatabaseHandle, PlannerAction, QueryResult, SchemaMetadata
 from .mcp_client import MCPServerClient
 from .schema_cache import SchemaCache
 from .schema_inspector import SchemaInspector
@@ -11,7 +11,14 @@ from .validator import QueryValidator, ValidationResult
 
 
 class QueryPlanner(Protocol):
-    def build_sql(self, prompt: str, schema_metadata: SchemaMetadata, previous_queries: list[str], previous_results: list[QueryResult]) -> str:
+    def build_action(
+        self,
+        prompt: str,
+        schema_metadata: SchemaMetadata,
+        previous_queries: list[str] | None = None,
+        previous_results: list[QueryResult] | None = None,
+        assistant_history: list[str] | None = None,
+    ) -> PlannerAction:
         raise NotImplementedError
 
 
@@ -44,10 +51,13 @@ class AuditLogger(Protocol):
 class OrchestrationResult:
     request_id: str
     database_id: str
-    sql: str
+    sql: str | None
     validation: ValidationResult
     result: QueryResult | None
     formatted_result: dict[str, object] | None
+    assistant_history: list[str] = field(default_factory=list)
+    executed_queries: list[str] = field(default_factory=list)
+    final_comment: str | None = None
     progress: list[str] = field(default_factory=list)
 
 
@@ -118,72 +128,72 @@ class DatabaseOrchestrator:
                 )
                 emit("Usando esquema en caché")
 
-            max_attempts = getattr(
-                request,
-                "max_attempts",
-                1,
-            )
+            max_attempts = getattr(request, "max_attempts", 3)
 
             attempt = 0
 
             last_result = None
             last_formatted = None
             last_sql = None
-            last_validation = None
+            last_validation = ValidationResult(True, [])
+            final_comment: str | None = None
             query_history: list[str] = []
             result_history: list[QueryResult] = []
+            assistant_history: list[str] = list(request.assistant_context)
+            executed_queries: list[str] = []
 
             while attempt < max_attempts:
                 attempt += 1
 
-                emit(
-                    f"Intento {attempt} de {max_attempts}"
-                )
+                emit(f"Intento {attempt} de {max_attempts}")
 
-                # Extraer title y descripción para darle más contexto al modelo
-
-                sql = "SELECT Titulo, Descripción FROM t_uzcf_b9dh LIMIT 10;"
-
-                self._audit_logger.log_query(sql)
-
-                rows = self._mcp_client.send_query(
-                    database_handle,
-                    sql,
-                )
-
-                sql = self._query_planner.build_sql(
+                action = self._query_planner.build_action(
                     prompt=request.prompt,
                     schema_metadata=schema_metadata,
                     previous_queries=query_history,
                     previous_results=result_history,
-                    sample_data=rows,  # Pasar las muestras                
-                    )
+                    assistant_history=assistant_history,
+                )
 
-                validation = (
-                    self._query_validator.validate(
-                        sql,
+                last_sql = action.sql
+
+                if action.comment:
+                    assistant_history.append(action.comment)
+
+                if action.action == "analysis":
+                    emit("Análisis recibido del agente")
+                    if not action.sql and attempt >= max_attempts:
+                        emit("No se ejecutó consulta y se alcanzó el límite de intentos")
+                        break
+                    continue
+
+                if action.action == "execute":
+                    if not action.sql:
+                        emit("No se encontró SQL para ejecutar")
+                        break
+
+                    validation = self._query_validator.validate(
+                        action.sql,
                         schema_metadata,
                         request.allow_write,
                     )
-                )
+                    last_validation = validation
 
-                if validation.is_valid:
+                    if not validation.is_valid:
+                        emit("Consulta no válida: " + "; ".join(validation.reasons))
+                        break
 
                     emit("Ejecutando consulta")
-
-                    self._audit_logger.log_query(sql)
+                    self._audit_logger.log_query(action.sql)
 
                     rows = self._mcp_client.send_query(
                         database_handle,
-                        sql,
+                        action.sql,
                     )
 
                     max_rows = (
                         request.max_rows
-                        if isinstance(
-                            request.max_rows,
-                            int,
-                        )
+                        if isinstance(request.max_rows, int)
                         else 100
                     )
 
@@ -193,17 +203,12 @@ class DatabaseOrchestrator:
                         truncated=len(rows) > max_rows,
                     )
 
-                    query_history.append(sql)
+                    query_history.append(action.sql)
+                    executed_queries.append(action.sql)
                     result_history.append(result)
 
                     emit("Formateando resultado")
-
-                    formatted_result = (
-                        self._result_formatter.format(
-                            result
-                        )
-                    )
-
+                    formatted_result = self._result_formatter.format(result)
                     self._audit_logger.log_result(
                         {
                             "row_count": result.row_count,
@@ -211,18 +216,18 @@ class DatabaseOrchestrator:
                         }
                     )
 
-                last_result = result
-                last_formatted = formatted_result
-                last_sql = sql
-                last_validation = validation
+                    last_result = result
+                    last_formatted = formatted_result
+                    last_validation = validation
+                    continue
 
-                if not validation.is_valid:
-                    emit(
-                        "Consulta no válida: "
-                        + "; ".join(validation.reasons)
-                    )
+                if action.action == "final":
+                    emit("Agente finalizó el razonamiento")
+                    final_comment = action.comment
                     break
 
+                emit(f"Acción desconocida recibida: {action.action}")
+                break
 
             emit("Listo")
 
@@ -233,6 +238,9 @@ class DatabaseOrchestrator:
                 validation=last_validation,
                 result=last_result,
                 formatted_result=last_formatted,
+                assistant_history=assistant_history,
+                executed_queries=executed_queries,
+                final_comment=final_comment,
                 progress=progress_messages,
             )
 

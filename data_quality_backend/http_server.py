@@ -67,6 +67,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                         },
                         "result": asdict(result.result) if result.result is not None else None,
                         "formatted_result": result.formatted_result,
+                        "assistant_history": result.assistant_history,
+                        "executed_queries": result.executed_queries,
+                        "final_comment": result.final_comment,
                         "progress": result.progress,
                     },
                 },
@@ -105,6 +108,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     },
                     "result": asdict(result.result) if result.result is not None else None,
                     "formatted_result": result.formatted_result,
+                    "assistant_history": result.assistant_history,
+                    "executed_queries": result.executed_queries,
+                    "final_comment": result.final_comment,
                     "progress": result.progress,
                 },
             },
@@ -140,6 +146,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         allow_write = bool(payload.get("allow_write", settings.allow_write_default))
         max_rows = payload.get("max_rows") if isinstance(payload.get("max_rows"), int) else settings.default_max_rows
         preferred_dialect = payload.get("preferred_dialect") if isinstance(payload.get("preferred_dialect"), str) else None
+        assistant_context = payload.get("assistant_context") if isinstance(payload.get("assistant_context"), list) else []
 
         return AgentRequest(
             request_id=request_id,
@@ -149,6 +156,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             allow_write=allow_write,
             max_rows=max_rows,
             preferred_dialect=preferred_dialect,
+            assistant_context=assistant_context,
         )
 
     def _send_json(self, payload: dict[str, Any], status: HTTPStatus) -> None:

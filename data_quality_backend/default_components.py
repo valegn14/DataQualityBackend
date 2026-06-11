@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from .contracts import AgentRequest, QueryResult, SchemaMetadata
+from .contracts import AgentRequest, PlannerAction, QueryResult, SchemaMetadata
 from .planner import HeuristicQueryPlanner
 
 
@@ -37,6 +37,21 @@ class ConsoleAuditLogger:
 
 
 class StaticQueryPlanner(HeuristicQueryPlanner):
-    def build_sql(self, prompt: str, schema_metadata: SchemaMetadata) -> str:
+    def build_action(
+        self,
+        prompt: str,
+        schema_metadata: SchemaMetadata,
+        previous_queries: list[str] | None = None,
+        previous_results: list[QueryResult] | None = None,
+        assistant_history: list[str] | None = None,
+        sample_data: list[dict] | None = None,
+    ) -> PlannerAction:
         _ = asdict(schema_metadata)
-        return super().build_sql(prompt, schema_metadata)
+        return super().build_action(
+            prompt,
+            schema_metadata,
+            previous_queries=previous_queries,
+            previous_results=previous_results,
+            assistant_history=assistant_history,
+            sample_data=sample_data,
+        )

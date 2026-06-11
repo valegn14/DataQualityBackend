@@ -14,6 +14,7 @@ class AgentRequest:
     allow_write: bool = False
     max_rows: int = 100
     preferred_dialect: str | None = None
+    assistant_context: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -67,4 +68,12 @@ class QueryResult:
     rows: list[dict[str, Any]] = field(default_factory=list)
     row_count: int = 0
     truncated: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class PlannerAction:
+    action: str
+    sql: str | None = None
+    comment: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
