@@ -66,6 +66,8 @@ class AppSettings:
     schema_cache_ttl_seconds: int = 300
     default_max_rows: int = 100
     allow_write_default: bool = False
+    # How many planning attempts the orchestrator will allow by default
+    max_planner_attempts: int = 10
 
     # -------------------------
     # HTTP SERVER
@@ -114,6 +116,8 @@ class AppSettings:
                 "ALLOW_WRITE_DEFAULT",
                 defaults.allow_write_default
             ),
+
+            max_planner_attempts=_get_int("MAX_PLANNER_ATTEMPTS", defaults.max_planner_attempts),
 
             # HTTP server
             http_host=os.getenv("HTTP_HOST", defaults.http_host),

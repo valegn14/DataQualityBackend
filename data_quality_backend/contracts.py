@@ -74,6 +74,6 @@ class QueryResult:
 @dataclass(slots=True)
 class PlannerAction:
     action: str
-    sql: str | None = None
+    sql: list[str] | None = None
     comment: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
 from .contracts import AgentRequest, DatabaseHandle, PlannerAction, QueryResult, SchemaMetadata
+from .settings import AppSettings
 from .mcp_client import MCPServerClient
 from .schema_cache import SchemaCache
 from .schema_inspector import SchemaInspector
@@ -51,7 +52,7 @@ class AuditLogger(Protocol):
 class OrchestrationResult:
     request_id: str
     database_id: str
-    sql: str | None
+    sql: list[str] | None
     validation: ValidationResult
     result: QueryResult | None
     formatted_result: dict[str, object] | None
@@ -71,6 +72,7 @@ class DatabaseOrchestrator:
         query_validator: QueryValidator,
         result_formatter: ResultFormatter,
         audit_logger: AuditLogger,
+        settings: AppSettings | None = None,
     ) -> None:
         self._mcp_client = mcp_client
         self._schema_cache = schema_cache
@@ -79,6 +81,7 @@ class DatabaseOrchestrator:
         self._query_validator = query_validator
         self._result_formatter = result_formatter
         self._audit_logger = audit_logger
+        self._settings = settings or AppSettings.from_env()
 
     def execute(
         self,
@@ -128,7 +131,7 @@ class DatabaseOrchestrator:
                 )
                 emit("Usando esquema en caché")
 
-            max_attempts = getattr(request, "max_attempts", 3)
+            max_attempts = getattr(request, "max_attempts", self._settings.max_planner_attempts)
 
             attempt = 0
 
@@ -172,53 +175,63 @@ class DatabaseOrchestrator:
                         emit("No se encontró SQL para ejecutar")
                         break
 
-                    validation = self._query_validator.validate(
-                        action.sql,
-                        schema_metadata,
-                        request.allow_write,
-                    )
-                    last_validation = validation
+                    # support multiple SQL statements returned by the planner
+                    stmts: list[str] = action.sql if isinstance(action.sql, list) else [action.sql]
 
-                    if not validation.is_valid:
-                        emit("Consulta no válida: " + "; ".join(validation.reasons))
-                        break
+                    for stmt in stmts:
+                        if not stmt or not isinstance(stmt, str):
+                            emit("Consulta vacía u no válida recibida del planner")
+                            continue
 
-                    emit("Ejecutando consulta")
-                    self._audit_logger.log_query(action.sql)
+                        validation = self._query_validator.validate(
+                            stmt,
+                            schema_metadata,
+                            request.allow_write,
+                        )
+                        last_validation = validation
 
-                    rows = self._mcp_client.send_query(
-                        database_handle,
-                        action.sql,
-                    )
+                        if not validation.is_valid:
+                            emit("Consulta no válida: " + "; ".join(validation.reasons))
+                            # stop processing further statements on validation failure
+                            break
 
-                    max_rows = (
-                        request.max_rows
-                        if isinstance(request.max_rows, int)
-                        else 100
-                    )
+                        emit("Ejecutando consulta")
+                        self._audit_logger.log_query(stmt)
 
-                    result = QueryResult(
-                        rows=rows,
-                        row_count=len(rows),
-                        truncated=len(rows) > max_rows,
-                    )
+                        rows = self._mcp_client.send_query(
+                            database_handle,
+                            stmt,
+                        )
 
-                    query_history.append(action.sql)
-                    executed_queries.append(action.sql)
-                    result_history.append(result)
+                        max_rows = (
+                            request.max_rows
+                            if isinstance(request.max_rows, int)
+                            else self._settings.default_max_rows
+                        )
 
-                    emit("Formateando resultado")
-                    formatted_result = self._result_formatter.format(result)
-                    self._audit_logger.log_result(
-                        {
-                            "row_count": result.row_count,
-                            "truncated": result.truncated,
-                        }
-                    )
+                        result = QueryResult(
+                            rows=rows,
+                            row_count=len(rows),
+                            truncated=len(rows) > max_rows,
+                        )
 
-                    last_result = result
-                    last_formatted = formatted_result
-                    last_validation = validation
+                        query_history.append(stmt)
+                        executed_queries.append(stmt)
+                        result_history.append(result)
+
+                        emit("Formateando resultado")
+                        formatted_result = self._result_formatter.format(result)
+                        self._audit_logger.log_result(
+                            {
+                                "row_count": result.row_count,
+                                "truncated": result.truncated,
+                            }
+                        )
+
+                        last_result = result
+                        last_formatted = formatted_result
+                        last_validation = validation
+
                     continue
 
                 if action.action == "final":

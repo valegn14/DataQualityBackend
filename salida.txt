@@ -1,0 +1,10 @@
+{
+"request_id":"req-1",
+"user_id":"user-1",
+"prompt":"quiero saber si este dataset me sirve para saber que datasets puedo encontrar en datos abiertos",
+"database_id":"uzcf-b9dh",
+"database_handle": {
+"handle_id":"8683c16eff474924b76a3b3d89e54850"
+},
+"max_attempts": 10
+}
