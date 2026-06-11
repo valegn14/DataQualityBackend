@@ -314,6 +314,7 @@ def run_http_server(settings: AppSettings | None = None) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        server.orchestrator.close_all_databases()
         server.server_close()
 
 

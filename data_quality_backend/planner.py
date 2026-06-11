@@ -392,7 +392,7 @@ class OllamaQueryPlanner(QueryPlanner):
 
         print("[_parse_planner_response] input:", text)
 
-        text = text.strip()
+        text = self._extract_json_payload(text)
 
         if text.startswith("{") and text.endswith("}"):
             try:
@@ -414,7 +414,14 @@ class OllamaQueryPlanner(QueryPlanner):
                 sql = payload.get("sql")
                 sql_list: list[str] | None = None
                 if isinstance(sql, list):
-                    sql_list = [s.strip() for s in sql if isinstance(s, str) and s.strip()]
+                    sql_list = []
+                    for item in sql:
+                        if isinstance(item, str) and item.strip():
+                            sql_list.append(item.strip())
+                        elif isinstance(item, dict):
+                            candidate = item.get("query") or item.get("sql")
+                            if isinstance(candidate, str) and candidate.strip():
+                                sql_list.append(candidate.strip())
                 elif isinstance(sql, str):
                     raw = sql.strip()
                     blocks = re.findall(r"```sql(.*?)```", raw, re.S)
@@ -459,3 +466,38 @@ class OllamaQueryPlanner(QueryPlanner):
             return PlannerAction(action="execute", sql=stmts, comment="SQL extracted from plain text response.")
 
         return PlannerAction(action="analysis", comment=text)
+
+    def _extract_json_payload(self, text: str) -> str:
+        text = text.strip()
+
+        fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.S)
+        if fenced:
+            return fenced.group(1).strip()
+
+        start = text.find("{")
+        if start == -1:
+            return text
+
+        depth = 0
+        in_string = False
+        escape = False
+        for index, char in enumerate(text[start:], start=start):
+            if escape:
+                escape = False
+                continue
+            if char == "\\":
+                escape = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : index + 1].strip()
+
+        return text

@@ -86,6 +86,23 @@ class DatabaseOrchestrator:
         self._result_formatter = result_formatter
         self._audit_logger = audit_logger
         self._settings = settings or AppSettings.from_env()
+        self._database_handles: dict[str, DatabaseHandle] = {}
+
+    def _get_database_handle(self, dataset_id: str) -> DatabaseHandle:
+        if dataset_id in self._database_handles:
+            return self._database_handles[dataset_id]
+
+        handle = self._mcp_client.instantiate_database(dataset_id)
+        self._database_handles[dataset_id] = handle
+        return handle
+
+    def close_all_databases(self) -> None:
+        for handle in list(self._database_handles.values()):
+            try:
+                self._mcp_client.release_database(handle)
+            except Exception as exc:
+                self._audit_logger.log_progress(f"No se pudo liberar el handle {handle.database_id}: {exc}")
+        self._database_handles.clear()
 
     def execute(
         self,
@@ -103,14 +120,12 @@ class DatabaseOrchestrator:
         emit("Recibido pedido")
         self._audit_logger.log_request(request)
 
-        emit("Instanciando base de datos")
+        emit("Obteniendo instancias de base de datos")
         database_ids = request.database_ids or [request.database_id]
-        database_handles: dict[str, DatabaseHandle] = {}
         schema_map: dict[str, SchemaMetadata] = {}
 
         for dataset_id in database_ids:
-            handle = self._mcp_client.instantiate_database(dataset_id)
-            database_handles[dataset_id] = handle
+            handle = self._get_database_handle(dataset_id)
             schema_metadata = self._schema_cache.get(dataset_id)
 
             if schema_metadata is None:
@@ -199,7 +214,7 @@ class DatabaseOrchestrator:
                         emit(f"Dataset desconocido: {target_dataset_id}")
                         break
 
-                    database_handle = database_handles[target_dataset_id]
+                    database_handle = self._get_database_handle(target_dataset_id)
                     target_schema = schema_map[target_dataset_id]
 
                     stmts: list[str] = action.sql if isinstance(action.sql, list) else [action.sql]
@@ -308,5 +323,4 @@ class DatabaseOrchestrator:
                 progress=progress_messages,
             )
         finally:
-            for handle in database_handles.values():
-                self._mcp_client.release_database(handle)
+            pass
